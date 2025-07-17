@@ -1,0 +1,872 @@
+local fov = 50
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local Teams = game:GetService("Teams")
+local Cam = workspace.CurrentCamera
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+
+-- 存储UI和状态
+local screenGui, frame
+local selectedTeams = {}
+local selectedPlayers = {}
+local teamCheckboxes = {}
+local playerCheckboxes = {}
+local uiInitialized = false
+local currentTeam = nil -- 当前选中的队伍
+local isMinimized = false -- 最小化状态
+local uiWasVisible = false -- 记录UI之前的可见状态
+local wasMinimized = false -- 记录之前的最小化状态
+
+-- 新增的配置变量
+local smoothnessFactor = 0.2 -- 平滑系数
+local yOffset = 1 -- Y轴偏移
+local maxAimDistance = 500 -- 最大瞄准距离
+
+-- 创建UI元素
+local function createUI()
+    -- 保存当前UI状态（如果存在）
+    if frame then
+        uiWasVisible = frame.Visible
+        wasMinimized = isMinimized
+    else
+        uiWasVisible = true -- 默认显示
+        wasMinimized = false -- 默认最大化
+    end
+    
+    if screenGui and screenGui.Parent then
+        screenGui:Destroy()
+    end
+    
+    -- 创建新的UI
+    screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "AimbotUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+    
+    frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0.4, 0, 0.6, 0)
+    frame.Position = UDim2.new(0.02, 0, 0.02, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    frame.BackgroundTransparency = 0.3
+    frame.BorderSizePixel = 0
+    frame.ClipsDescendants = true
+    frame.Visible = uiWasVisible -- 恢复之前的可见状态
+    frame.Parent = screenGui
+    
+    local titleBar = Instance.new("Frame")
+    titleBar.Size = UDim2.new(1, 0, 0.08, 0)
+    titleBar.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+    titleBar.BorderSizePixel = 0
+    titleBar.Parent = frame
+    
+    local title = Instance.new("TextLabel")
+    title.Text = "高级瞄准设置"
+    title.Size = UDim2.new(0.6, 0, 1, 0)
+    title.Position = UDim2.new(0.1, 0, 0, 0)
+    title.BackgroundTransparency = 1
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 16
+    title.Parent = titleBar
+    
+    -- 最小化按钮
+    local minimizeButton = Instance.new("TextButton")
+    minimizeButton.Name = "MinimizeButton"
+    minimizeButton.Text = wasMinimized and "▲" or "▼"
+    minimizeButton.Size = UDim2.new(0.1, 0, 1, 0)
+    minimizeButton.Position = UDim2.new(0.7, 0, 0, 0)
+    minimizeButton.BackgroundTransparency = 1
+    minimizeButton.TextColor3 = Color3.new(1, 1, 1)
+    minimizeButton.Font = Enum.Font.GothamBold
+    minimizeButton.TextSize = 16
+    minimizeButton.Parent = titleBar
+    
+    -- 关闭按钮
+    local closeButton = Instance.new("TextButton")
+    closeButton.Text = "❌"
+    closeButton.Size = UDim2.new(0.1, 0, 1, 0)
+    closeButton.Position = UDim2.new(0.8, 0, 0, 0)
+    closeButton.BackgroundTransparency = 1
+    closeButton.TextColor3 = Color3.new(1, 1, 1)
+    closeButton.Font = Enum.Font.GothamBold
+    closeButton.TextSize = 18
+    closeButton.Parent = titleBar
+    
+    -- 隐藏按钮
+    local hideButton = Instance.new("TextButton")
+    hideButton.Text = "◻"
+    hideButton.Size = UDim2.new(0.1, 0, 1, 0)
+    hideButton.Position = UDim2.new(0.9, 0, 0, 0)
+    hideButton.BackgroundTransparency = 1
+    hideButton.TextColor3 = Color3.new(1, 1, 1)
+    hideButton.Font = Enum.Font.GothamBold
+    hideButton.TextSize = 18
+    hideButton.Parent = titleBar
+    
+    -- 创建左右分栏容器
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Name = "ContentFrame"
+    contentFrame.Size = UDim2.new(1, 0, 0.84, 0)
+    contentFrame.Position = UDim2.new(0, 0, 0.08, 0)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Visible = not wasMinimized -- 根据之前的最小化状态设置
+    contentFrame.Parent = frame
+    
+    -- 左侧队伍列表
+    local teamsFrame = Instance.new("Frame")
+    teamsFrame.Size = UDim2.new(0.4, 0, 0.7, 0) -- 高度调整为70%
+    teamsFrame.BackgroundTransparency = 1
+    teamsFrame.Parent = contentFrame
+    
+    local teamsScroll = Instance.new("ScrollingFrame")
+    teamsScroll.Size = UDim2.new(1, 0, 1, 0)
+    teamsScroll.BackgroundTransparency = 1
+    teamsScroll.BorderSizePixel = 0
+    teamsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    teamsScroll.ScrollBarThickness = 6
+    teamsScroll.ScrollBarImageColor3 = Color3.new(0.7, 0.7, 0.7)
+    teamsScroll.Parent = teamsFrame
+    
+    local teamsLayout = Instance.new("UIListLayout")
+    teamsLayout.Padding = UDim.new(0, 8)
+    teamsLayout.Parent = teamsScroll
+    
+    -- 右侧玩家列表
+    local playersFrame = Instance.new("Frame")
+    playersFrame.Size = UDim2.new(0.6, 0, 0.7, 0) -- 高度调整为70%
+    playersFrame.Position = UDim2.new(0.4, 0, 0, 0)
+    playersFrame.BackgroundTransparency = 1
+    playersFrame.Visible = false
+    playersFrame.Parent = contentFrame
+    
+    local playersTitle = Instance.new("TextLabel")
+    playersTitle.Text = "选择玩家"
+    playersTitle.Size = UDim2.new(1, 0, 0.1, 0)
+    playersTitle.BackgroundTransparency = 1
+    playersTitle.TextColor3 = Color3.new(1, 1, 1)
+    playersTitle.Font = Enum.Font.GothamBold
+    playersTitle.TextSize = 14
+    playersTitle.Parent = playersFrame
+    
+    local playersScroll = Instance.new("ScrollingFrame")
+    playersScroll.Size = UDim2.new(1, 0, 0.8, 0)
+    playersScroll.Position = UDim2.new(0, 0, 0.1, 0)
+    playersScroll.BackgroundTransparency = 1
+    playersScroll.BorderSizePixel = 0
+    playersScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    playersScroll.ScrollBarThickness = 6
+    playersScroll.ScrollBarImageColor3 = Color3.new(0.7, 0.7, 0.7)
+    playersScroll.Parent = playersFrame
+    
+    local playersLayout = Instance.new("UIListLayout")
+    playersLayout.Padding = UDim.new(0, 5)
+    playersLayout.Parent = playersScroll
+    
+    -- 返回按钮
+    local backButton = Instance.new("TextButton")
+    backButton.Text = "← 返回队伍列表"
+    backButton.Size = UDim2.new(1, 0, 0.1, 0)
+    backButton.Position = UDim2.new(0, 0, 0.9, 0)
+    backButton.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
+    backButton.BorderSizePixel = 0
+    backButton.TextColor3 = Color3.new(1, 1, 1)
+    backButton.Font = Enum.Font.Gotham
+    backButton.TextSize = 12
+    backButton.Visible = false
+    backButton.Parent = playersFrame
+    
+    -- 新增的设置区域
+    local settingsFrame = Instance.new("Frame")
+    settingsFrame.Name = "SettingsFrame"
+    settingsFrame.Size = UDim2.new(1, 0, 0.2, 0)
+    settingsFrame.Position = UDim2.new(0, 0, 0.7, 0) -- 位于列表下方
+    settingsFrame.BackgroundTransparency = 1
+    settingsFrame.Parent = contentFrame
+    
+    -- 平滑系数设置
+    local smoothnessLabel = Instance.new("TextLabel")
+    smoothnessLabel.Text = "平滑系数 (0.1-1.0):"
+    smoothnessLabel.Size = UDim2.new(0.3, 0, 0.3, 0)
+    smoothnessLabel.Position = UDim2.new(0.05, 0, 0.1, 0)
+    smoothnessLabel.BackgroundTransparency = 1
+    smoothnessLabel.TextColor3 = Color3.new(1, 1, 1)
+    smoothnessLabel.Font = Enum.Font.Gotham
+    smoothnessLabel.TextSize = 12
+    smoothnessLabel.TextXAlignment = Enum.TextXAlignment.Left
+    smoothnessLabel.Parent = settingsFrame
+    
+    local smoothnessBox = Instance.new("TextBox")
+    smoothnessBox.Name = "SmoothnessBox"
+    smoothnessBox.Text = tostring(smoothnessFactor)
+    smoothnessBox.Size = UDim2.new(0.15, 0, 0.3, 0)
+    smoothnessBox.Position = UDim2.new(0.35, 0, 0.1, 0)
+    smoothnessBox.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    smoothnessBox.BorderSizePixel = 0
+    smoothnessBox.TextColor3 = Color3.new(1, 1, 1)
+    smoothnessBox.Font = Enum.Font.Gotham
+    smoothnessBox.TextSize = 12
+    smoothnessBox.Parent = settingsFrame
+    
+    -- Y轴偏移设置
+    local yOffsetLabel = Instance.new("TextLabel")
+    yOffsetLabel.Text = "Y轴偏移:"
+    yOffsetLabel.Size = UDim2.new(0.3, 0, 0.3, 0)
+    yOffsetLabel.Position = UDim2.new(0.55, 0, 0.1, 0)
+    yOffsetLabel.BackgroundTransparency = 1
+    yOffsetLabel.TextColor3 = Color3.new(1, 1, 1)
+    yOffsetLabel.Font = Enum.Font.Gotham
+    yOffsetLabel.TextSize = 12
+    yOffsetLabel.TextXAlignment = Enum.TextXAlignment.Left
+    yOffsetLabel.Parent = settingsFrame
+    
+    local yOffsetBox = Instance.new("TextBox")
+    yOffsetBox.Name = "YOffsetBox"
+    yOffsetBox.Text = tostring(yOffset)
+    yOffsetBox.Size = UDim2.new(0.15, 0, 0.3, 0)
+    yOffsetBox.Position = UDim2.new(0.85, 0, 0.1, 0)
+    yOffsetBox.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    yOffsetBox.BorderSizePixel = 0
+    yOffsetBox.TextColor3 = Color3.new(1, 1, 1)
+    yOffsetBox.Font = Enum.Font.Gotham
+    yOffsetBox.TextSize = 12
+    yOffsetBox.Parent = settingsFrame
+    
+    -- 最大距离设置
+    local distanceLabel = Instance.new("TextLabel")
+    distanceLabel.Text = "最大距离:"
+    distanceLabel.Size = UDim2.new(0.3, 0, 0.3, 0)
+    distanceLabel.Position = UDim2.new(0.05, 0, 0.6, 0)
+    distanceLabel.BackgroundTransparency = 1
+    distanceLabel.TextColor3 = Color3.new(1, 1, 1)
+    distanceLabel.Font = Enum.Font.Gotham
+    distanceLabel.TextSize = 12
+    distanceLabel.TextXAlignment = Enum.TextXAlignment.Left
+    distanceLabel.Parent = settingsFrame
+    
+    local distanceBox = Instance.new("TextBox")
+    distanceBox.Name = "DistanceBox"
+    distanceBox.Text = tostring(maxAimDistance)
+    distanceBox.Size = UDim2.new(0.15, 0, 0.3, 0)
+    distanceBox.Position = UDim2.new(0.35, 0, 0.6, 0)
+    distanceBox.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    distanceBox.BorderSizePixel = 0
+    distanceBox.TextColor3 = Color3.new(1, 1, 1)
+    distanceBox.Font = Enum.Font.Gotham
+    distanceBox.TextSize = 12
+    distanceBox.Parent = settingsFrame
+    
+    -- 应用设置按钮
+    local applyButton = Instance.new("TextButton")
+    applyButton.Text = "应用设置"
+    applyButton.Size = UDim2.new(0.3, 0, 0.3, 0)
+    applyButton.Position = UDim2.new(0.65, 0, 0.6, 0)
+    applyButton.BackgroundColor3 = Color3.fromRGB(60, 100, 60)
+    applyButton.BorderSizePixel = 0
+    applyButton.TextColor3 = Color3.new(1, 1, 1)
+    applyButton.Font = Enum.Font.Gotham
+    applyButton.TextSize = 12
+    applyButton.Parent = settingsFrame
+    
+    -- 底部按钮区域
+    local buttonsFrame = Instance.new("Frame")
+    buttonsFrame.Name = "ButtonsFrame"
+    buttonsFrame.Size = UDim2.new(1, 0, 0.08, 0)
+    buttonsFrame.Position = UDim2.new(0, 0, 0.92, 0)
+    buttonsFrame.BackgroundTransparency = 1
+    buttonsFrame.Visible = not wasMinimized -- 根据之前的最小化状态设置
+    buttonsFrame.Parent = frame
+    
+    -- 添加"除自己队伍外全选"按钮
+    local selectOthersButton = Instance.new("TextButton")
+    selectOthersButton.Text = "除自己队伍外全选"
+    selectOthersButton.Size = UDim2.new(0.45, 0, 1, 0)
+    selectOthersButton.Position = UDim2.new(0.025, 0, 0, 0)
+    selectOthersButton.BackgroundColor3 = Color3.fromRGB(60, 60, 100)
+    selectOthersButton.BorderSizePixel = 0
+    selectOthersButton.TextColor3 = Color3.new(1, 1, 1)
+    selectOthersButton.Font = Enum.Font.Gotham
+    selectOthersButton.TextSize = 12
+    selectOthersButton.Parent = buttonsFrame
+    
+    -- 添加"全部取消"按钮
+    local deselectAllButton = Instance.new("TextButton")
+    deselectAllButton.Text = "全部取消"
+    deselectAllButton.Size = UDim2.new(0.45, 0, 1, 0)
+    deselectAllButton.Position = UDim2.new(0.525, 0, 0, 0)
+    deselectAllButton.BackgroundColor3 = Color3.fromRGB(100, 60, 60)
+    deselectAllButton.BorderSizePixel = 0
+    deselectAllButton.TextColor3 = Color3.new(1, 1, 1)
+    deselectAllButton.Font = Enum.Font.Gotham
+    deselectAllButton.TextSize = 12
+    deselectAllButton.Parent = buttonsFrame
+    
+    -- 动态调整滚动区域大小
+    teamsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        teamsScroll.CanvasSize = UDim2.new(0, 0, 0, teamsLayout.AbsoluteContentSize.Y + 10)
+    end)
+    
+    playersLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        playersScroll.CanvasSize = UDim2.new(0, 0, 0, playersLayout.AbsoluteContentSize.Y + 10)
+    end)
+    
+    -- 初始化UI
+    local function initUI()
+        -- 清空现有UI元素
+        for _, child in ipairs(teamsScroll:GetChildren()) do
+            if child:IsA("Frame") then
+                child:Destroy()
+            end
+        end
+        
+        for _, child in ipairs(playersScroll:GetChildren()) do
+            if child:IsA("Frame") then
+                child:Destroy()
+            end
+        end
+        
+        -- 获取所有队伍
+        local allTeams = Teams:GetTeams()
+        
+        -- 为每个队伍创建选择项
+        for _, team in ipairs(allTeams) do
+            local teamContainer = Instance.new("Frame")
+            teamContainer.Size = UDim2.new(0.95, 0, 0, 40)
+            teamContainer.BackgroundTransparency = 1
+            teamContainer.Parent = teamsScroll
+            
+            local teamFrame = Instance.new("Frame")
+            teamFrame.Size = UDim2.new(1, 0, 1, 0)
+            teamFrame.BackgroundColor3 = currentTeam == team.Name and Color3.fromRGB(50, 50, 70) or Color3.fromRGB(40, 40, 60)
+            teamFrame.BorderSizePixel = 0
+            teamFrame.Parent = teamContainer
+            
+            local checkbox = Instance.new("TextButton")
+            checkbox.Name = "TeamCheckbox"
+            checkbox.Size = UDim2.new(0.1, 0, 1, 0)
+            checkbox.Position = UDim2.new(0, 0, 0, 0)
+            checkbox.BackgroundColor3 = Color3.fromRGB(80, 80, 100)
+            checkbox.BorderSizePixel = 0
+            checkbox.Text = selectedTeams[team.Name] and "✓" or ""
+            checkbox.Font = Enum.Font.GothamBold
+            checkbox.TextSize = 16
+            checkbox.TextColor3 = Color3.new(1, 1, 1)
+            checkbox.Parent = teamFrame
+            
+            local teamName = Instance.new("TextLabel")
+            teamName.Text = team.Name
+            teamName.Size = UDim2.new(0.7, 0, 1, 0)
+            teamName.Position = UDim2.new(0.15, 0, 0, 0)
+            teamName.BackgroundTransparency = 1
+            teamName.TextColor3 = team.TeamColor.Color
+            teamName.Font = Enum.Font.GothamBold
+            teamName.TextSize = 14
+            teamName.TextXAlignment = Enum.TextXAlignment.Left
+            teamName.Parent = teamFrame
+            
+            -- 添加查看玩家按钮
+            local viewPlayersButton = Instance.new("TextButton")
+            viewPlayersButton.Text = "→"
+            viewPlayersButton.Size = UDim2.new(0.15, 0, 1, 0)
+            viewPlayersButton.Position = UDim2.new(0.85, 0, 0, 0)
+            viewPlayersButton.BackgroundTransparency = 1
+            viewPlayersButton.TextColor3 = Color3.new(1, 1, 1)
+            viewPlayersButton.Font = Enum.Font.GothamBold
+            viewPlayersButton.TextSize = 18
+            viewPlayersButton.Parent = teamFrame
+            
+            -- 存储引用
+            teamCheckboxes[team.Name] = checkbox
+            
+            -- 添加队伍点击事件
+            checkbox.MouseButton1Click:Connect(function()
+                selectedTeams[team.Name] = not selectedTeams[team.Name]
+                checkbox.Text = selectedTeams[team.Name] and "✓" or ""
+            end)
+            
+            -- 添加查看玩家点击事件
+            viewPlayersButton.MouseButton1Click:Connect(function()
+                currentTeam = team.Name
+                playersFrame.Visible = true
+                teamsFrame.Visible = false
+                backButton.Visible = true
+                
+                -- 清空现有玩家列表
+                for _, child in ipairs(playersScroll:GetChildren()) do
+                    if child:IsA("Frame") then
+                        child:Destroy()
+                    end
+                end
+                
+                -- 更新玩家列表标题
+                playersTitle.Text = team.Name .. " 的玩家"
+                
+                -- 获取该队伍的所有玩家
+                local playersInTeam = {}
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if player.Team == team then
+                        table.insert(playersInTeam, player)
+                    end
+                end
+                
+                -- 为每个玩家创建选择项
+                for _, player in ipairs(playersInTeam) do
+                    local playerContainer = Instance.new("Frame")
+                    playerContainer.Size = UDim2.new(0.95, 0, 0, 35)
+                    playerContainer.BackgroundTransparency = 1
+                    playerContainer.Parent = playersScroll
+                    
+                    local playerFrame = Instance.new("Frame")
+                    playerFrame.Size = UDim2.new(1, 0, 1, 0)
+                    playerFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+                    playerFrame.BorderSizePixel = 0
+                    playerFrame.Parent = playerContainer
+                    
+                    local playerCheckbox = Instance.new("TextButton")
+                    playerCheckbox.Name = "PlayerCheckbox"
+                    playerCheckbox.Size = UDim2.new(0.1, 0, 1, 0)
+                    playerCheckbox.Position = UDim2.new(0, 0, 0, 0)
+                    playerCheckbox.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+                    playerCheckbox.BorderSizePixel = 0
+                    playerCheckbox.Text = selectedPlayers[player.UserId] and "✓" or ""
+                    playerCheckbox.Font = Enum.Font.GothamBold
+                    playerCheckbox.TextSize = 14
+                    playerCheckbox.TextColor3 = Color3.new(1, 1, 1)
+                    playerCheckbox.Parent = playerFrame
+                    
+                    local playerName = Instance.new("TextLabel")
+                    playerName.Text = player.Name
+                    playerName.Size = UDim2.new(0.8, 0, 1, 0)
+                    playerName.Position = UDim2.new(0.15, 0, 0, 0)
+                    playerName.BackgroundTransparency = 1
+                    playerName.TextColor3 = Color3.new(1, 1, 1)
+                    playerName.Font = Enum.Font.Gotham
+                    playerName.TextSize = 14
+                    playerName.TextXAlignment = Enum.TextXAlignment.Left
+                    playerName.Parent = playerFrame
+                    
+                    -- 存储玩家复选框引用
+                    if not playerCheckboxes[team.Name] then
+                        playerCheckboxes[team.Name] = {}
+                    end
+                    playerCheckboxes[team.Name][player.UserId] = playerCheckbox
+                    
+                    -- 添加玩家点击事件
+                    playerCheckbox.MouseButton1Click:Connect(function()
+                        selectedPlayers[player.UserId] = not selectedPlayers[player.UserId]
+                        playerCheckbox.Text = selectedPlayers[player.UserId] and "✓" or ""
+                    end)
+                end
+            end)
+        end
+    end
+    
+    -- 返回按钮事件
+    backButton.MouseButton1Click:Connect(function()
+        playersFrame.Visible = false
+        teamsFrame.Visible = true
+        backButton.Visible = false
+    end)
+    
+    -- 最小化/最大化功能
+    local function toggleMinimize()
+        isMinimized = not isMinimized
+        
+        if isMinimized then
+            -- 最小化状态
+            minimizeButton.Text = "▲" -- 向上箭头表示可最大化
+            contentFrame.Visible = false
+            buttonsFrame.Visible = false
+            frame.Size = UDim2.new(0.4, 0, 0.08, 0) -- 只显示标题栏
+        else
+            -- 最大化状态
+            minimizeButton.Text = "▼" -- 向下箭头表示可最小化
+            contentFrame.Visible = true
+            buttonsFrame.Visible = true
+            frame.Size = UDim2.new(0.4, 0, 0.6, 0) -- 恢复完整大小
+        end
+    end
+    
+    -- 关闭UI
+    local function closeUI()
+        local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local tween = TweenService:Create(frame, tweenInfo, {Size = UDim2.new(0, 0, 0.6, 0)})
+        tween:Play()
+        
+        tween.Completed:Connect(function()
+            frame.Visible = false
+        end)
+    end
+    
+    -- 隐藏UI（保留运行）
+    local function hideUI()
+        frame.Visible = false
+    end
+    
+    -- "除自己队伍外全选"功能
+    selectOthersButton.MouseButton1Click:Connect(function()
+        local localPlayer = Players.LocalPlayer
+        local localTeam = localPlayer.Team
+        
+        for teamName, checkbox in pairs(teamCheckboxes) do
+            if localTeam and teamName == localTeam.Name then
+                selectedTeams[teamName] = false
+                checkbox.Text = ""
+            else
+                selectedTeams[teamName] = true
+                checkbox.Text = "✓"
+            end
+        end
+    end)
+    
+    -- "全部取消"功能
+    deselectAllButton.MouseButton1Click:Connect(function()
+        -- 取消所有队伍选择
+        for teamName, checkbox in pairs(teamCheckboxes) do
+            selectedTeams[teamName] = false
+            checkbox.Text = ""
+        end
+        
+        -- 取消所有玩家选择
+        for playerId, _ in pairs(selectedPlayers) do
+            selectedPlayers[playerId] = false
+        end
+        
+        -- 更新所有玩家复选框
+        for teamName, players in pairs(playerCheckboxes) do
+            for playerId, checkbox in pairs(players) do
+                if checkbox.Parent then
+                    checkbox.Text = ""
+                end
+            end
+        end
+    end)
+    
+    -- 应用设置按钮事件
+    applyButton.MouseButton1Click:Connect(function()
+        -- 更新平滑系数
+        local newSmoothness = tonumber(smoothnessBox.Text)
+        if newSmoothness and newSmoothness >= 0.1 and newSmoothness <= 1.0 then
+            smoothnessFactor = newSmoothness
+        else
+            smoothnessBox.Text = tostring(smoothnessFactor)
+        end
+        
+        -- 更新Y轴偏移
+        local newYOffset = tonumber(yOffsetBox.Text)
+        if newYOffset then
+            yOffset = newYOffset
+        else
+            yOffsetBox.Text = tostring(yOffset)
+        end
+        
+        -- 更新最大距离
+        local newMaxDistance = tonumber(distanceBox.Text)
+        if newMaxDistance and newMaxDistance > 0 then
+            maxAimDistance = newMaxDistance
+        else
+            distanceBox.Text = tostring(maxAimDistance)
+        end
+    end)
+    
+    -- 初始化UI
+    initUI()
+    
+    -- UI事件处理
+    minimizeButton.MouseButton1Click:Connect(toggleMinimize)
+    closeButton.MouseButton1Click:Connect(closeUI)
+    hideButton.MouseButton1Click:Connect(hideUI)
+    
+    -- 应用之前的最小化状态
+    if wasMinimized then
+        toggleMinimize()
+    end
+    
+    return true
+end
+
+-- 首次创建UI
+uiInitialized = createUI()
+
+-- 按F6重新打开UI
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.F6 then
+        -- 确保UI已创建
+        if not uiInitialized then
+            uiInitialized = createUI()
+        else
+            -- 如果UI已经存在，确保显示并最大化
+            frame.Visible = true
+            isMinimized = false
+            
+            -- 确保最大化状态
+            if frame:FindFirstChild("ContentFrame") then
+                frame.ContentFrame.Visible = true
+            end
+            if frame:FindFirstChild("ButtonsFrame") then
+                frame.ButtonsFrame.Visible = true
+            end
+            if frame:FindFirstChild("MinimizeButton") then
+                frame.MinimizeButton.Text = "▼"
+            end
+            
+            -- 恢复完整大小
+            frame.Size = UDim2.new(0.4, 0, 0.6, 0)
+        end
+        
+        -- 播放动画
+        local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local tween = TweenService:Create(frame, tweenInfo, {Size = UDim2.new(0.4, 0, 0.6, 0)})
+        tween:Play()
+    end
+end)
+
+-- 修复的目标检测逻辑
+local function shouldTargetPlayer(targetPlayer)
+    local localPlayer = Players.LocalPlayer
+    
+    -- 如果目标玩家是自己，直接跳过
+    if targetPlayer == localPlayer then
+        return false
+    end
+    
+    -- 如果目标玩家没有队伍，视为可攻击
+    if not targetPlayer.Team then
+        return true
+    end
+    
+    local teamName = targetPlayer.Team.Name
+    local playerId = targetPlayer.UserId
+    
+    -- 情况1: 如果该队伍被选中且该队伍没有单独选择的玩家，则整个队伍都被瞄准
+    if selectedTeams[teamName] then
+        -- 检查该队伍是否有任何玩家被单独选中
+        local hasSelectedPlayersInTeam = false
+        
+        -- 遍历所有选中的玩家，看是否有属于该队伍的
+        for pid, selected in pairs(selectedPlayers) do
+            if selected then
+                local p = Players:GetPlayerByUserId(pid)
+                if p and p.Team and p.Team.Name == teamName then
+                    hasSelectedPlayersInTeam = true
+                    break
+                end
+            end
+        end
+        
+        -- 如果该队伍中没有单独选择的玩家，则瞄准整个队伍
+        if not hasSelectedPlayersInTeam then
+            return true
+        end
+    end
+    
+    -- 情况2: 如果该玩家被单独选中，则瞄准
+    if selectedPlayers[playerId] then
+        return true
+    end
+    
+    return false
+end
+
+-- 创建FOV圈
+local FOVring = Drawing.new("Circle")
+FOVring.Visible = false
+FOVring.Radius = fov
+FOVring.Position = Cam.ViewportSize / 2
+FOVring.Thickness = 1
+FOVring.Color = Color3.new(1, 1, 1)
+FOVring.Transparency = 0.5
+
+local renderConnection
+local aimbotEnabled = true
+local showFOV = false
+
+local function updateDrawings()
+    FOVring.Position = Cam.ViewportSize / 2
+    FOVring.Visible = showFOV
+end
+
+-- 可见性射线检测函数
+local function isPartVisible(part)
+    -- 获取相机位置和目标位置
+    local cameraPos = Cam.CFrame.Position
+    local partPos = part.Position
+    
+    -- 计算距离和方向
+    local distance = (cameraPos - partPos).Magnitude
+    local direction = (partPos - cameraPos).Unit
+    
+    -- 设置射线参数
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = {Players.LocalPlayer.Character}
+    raycastParams.IgnoreWater = true
+    
+    -- 发射射线
+    local raycastResult = Workspace:Raycast(cameraPos, direction * distance, raycastParams)
+    
+    -- 如果没有命中物体，说明目标可见
+    if not raycastResult then
+        return true
+    end
+    
+    -- 检查命中的物体是否是目标本身或其父级
+    local hitPart = raycastResult.Instance
+    if hitPart and (hitPart == part or hitPart:IsDescendantOf(part.Parent)) then
+        return true
+    end
+    
+    return false
+end
+
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.Delete then
+        renderConnection:Disconnect()
+        FOVring:Remove()
+        if screenGui and screenGui.Parent then
+            screenGui:Destroy()
+        end
+    elseif input.KeyCode == Enum.KeyCode.Insert then
+        aimbotEnabled = not aimbotEnabled
+    elseif input.KeyCode == Enum.KeyCode.F5 then
+        showFOV = not showFOV
+    end
+end)
+
+local function smoothLookAt(target, smoothness)
+    local currentCF = Cam.CFrame
+    local lookVector = (target - currentCF.Position).Unit
+    
+    -- 计算当前视线方向与目标方向的夹角
+    local currentLookVector = currentCF.LookVector
+    local angle = math.deg(math.acos(currentLookVector:Dot(lookVector)))
+    
+    -- 只有角度大于阈值时才瞄准
+    if angle > 2 then
+        local targetCF = CFrame.new(currentCF.Position, target)
+        Cam.CFrame = currentCF:Lerp(targetCF, smoothness)
+    end
+end
+
+local function getClosestPlayerInFOV()
+    local nearest = nil
+    local minDistance = math.huge
+    local screenCenter = Cam.ViewportSize / 2
+    local localPlayer = Players.LocalPlayer
+    local cameraPos = Cam.CFrame.Position
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        -- 跳过自己
+        if player == localPlayer then
+            continue
+        end
+        
+        -- 使用UI选择的队伍和玩家进行检测
+        if not shouldTargetPlayer(player) then
+            continue
+        end
+        
+        local character = player.Character
+        if not character then continue end
+        
+        local humanoid = character:FindFirstChild("Humanoid")
+        local head = character:FindFirstChild("Head")
+        if not humanoid or humanoid.Health <= 0 or not head then continue end
+
+        local ePos, isVisible = Cam:WorldToViewportPoint(head.Position)
+        if isVisible and ePos.Z > 0 then
+            -- 可见性射线检测
+            if not isPartVisible(head) then
+                continue
+            end
+            
+            local screenPos = Vector2.new(ePos.X, ePos.Y)
+            local screenDistance = (screenPos - screenCenter).Magnitude
+            local worldDistance = (cameraPos - head.Position).Magnitude
+            
+            -- 检查是否在FOV范围内且是最近的目标
+            if screenDistance < fov and worldDistance < minDistance and worldDistance < maxAimDistance then
+                minDistance = worldDistance
+                nearest = head.Position + Vector3.new(0, yOffset, 0)  -- 使用UI设置的Y轴偏移
+            end
+        end
+    end
+    return nearest
+end
+
+renderConnection = RunService.RenderStepped:Connect(function()
+    updateDrawings()
+    if aimbotEnabled then
+        local target = getClosestPlayerInFOV()
+        if target then
+            smoothLookAt(target, smoothnessFactor)  -- 使用UI设置的平滑系数
+        end
+    end
+end)
+
+-- 队伍变更时更新UI
+Teams.ChildAdded:Connect(function()
+    if uiInitialized then
+        -- 保存当前状态
+        local wasVisible = frame and frame.Visible or false
+        createUI()
+        frame.Visible = wasVisible
+    end
+end)
+
+Teams.ChildRemoved:Connect(function()
+    if uiInitialized then
+        -- 保存当前状态
+        local wasVisible = frame and frame.Visible or false
+        createUI()
+        frame.Visible = wasVisible
+    end
+end)
+
+-- 玩家加入/离开时更新UI
+Players.PlayerAdded:Connect(function(player)
+    if uiInitialized then
+        -- 保存当前状态
+        local wasVisible = frame and frame.Visible or false
+        createUI()
+        frame.Visible = wasVisible
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    -- 移除该玩家的选择状态
+    selectedPlayers[player.UserId] = nil
+    
+    if uiInitialized then
+        -- 保存当前状态
+        local wasVisible = frame and frame.Visible or false
+        createUI()
+        frame.Visible = wasVisible
+    end
+end)
+
+-- 修复角色死亡/重置后UI消失的问题
+local function onCharacterAdded(character)
+    -- 延迟确保PlayerGui已重置
+    wait(0.5)
+    
+    -- 重新创建UI
+    if not uiInitialized then
+        uiInitialized = createUI()
+    else
+        -- 保存当前状态
+        local wasVisible = frame and frame.Visible or false
+        createUI()
+        frame.Visible = wasVisible
+    end
+end
+
+local localPlayer = Players.LocalPlayer
+localPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+-- 确保初始角色加载后创建UI
+if localPlayer.Character then
+    onCharacterAdded(localPlayer.Character)
+end

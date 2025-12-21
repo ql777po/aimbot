@@ -678,7 +678,7 @@ renderConnection = RunService.RenderStepped:Connect(function()
     if aimbotEnabled then
         local target = getClosestPlayerInFOV()
         if target then
-            smoothLookAt(target, 0.4)  -- 平滑系数0.2
+            smoothLookAt(target, 0.3)  -- 平滑系数0.2
         end
     end
 end)

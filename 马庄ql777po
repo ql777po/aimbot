@@ -1,4 +1,4 @@
-local fov = 50
+local fov = 70
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
@@ -620,7 +620,7 @@ local function smoothLookAt(target, smoothness)
     local angle = math.deg(math.acos(currentLookVector:Dot(lookVector)))
     
     -- 只有角度大于阈值时才瞄准
-    if angle > 2 then
+    if angle > 0 then
         local targetCF = CFrame.new(currentCF.Position, target)
         Cam.CFrame = currentCF:Lerp(targetCF, smoothness)
     end
@@ -632,7 +632,7 @@ local function getClosestPlayerInFOV()
     local screenCenter = Cam.ViewportSize / 2
     local localPlayer = Players.LocalPlayer
     local cameraPos = Cam.CFrame.Position
-    local maxDistance = 500  -- 最大瞄准距离
+    local maxDistance = 700  -- 最大瞄准距离
 
     for _, player in ipairs(Players:GetPlayers()) do
         -- 跳过自己
